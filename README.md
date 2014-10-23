@@ -13,7 +13,6 @@ All good browsers and IE8+ (it relies on JSON.parse and JSON.stringify). If you 
 * Tiny footprint. 2.7KB minified!
 * No dependencies at all!
 * Good support for old browsers!
-*
 
 ## Anything Missing?
 
@@ -35,9 +34,8 @@ You need to include one of the files in  `src/*`.
 
 This declares a global PrintNodeApi object. Which you can instantiate and use as detailed in the example below.
 
-Sample JS 
 
-```
+```javascript
 var options = {
     // changes the value of 'this' in the success, error, timeout and complete
     // handlers. The default value of 'this' is the instance of the PrintNodeApi
