@@ -145,6 +145,7 @@ var PrintNodeApi = (function() {
                 o.progress(++n);
             }
         };
+
         // build and make the request
         xhr.open(reqType, url);
         xhr.setRequestHeader("Authorization", "Basic " + btoa(apiKey));
@@ -197,6 +198,23 @@ var PrintNodeApi = (function() {
     ApiClient.prototype.printjob = function getPrinters (options, payload) {
         var merged = _extend(options, this.options);
         ajax(merged, 'POST', 'printjobs', payload, this.options.apiKey, options.context||this);
+    };
+    ApiClient.prototype.scales = function getScales (options, params) {
+      var defaults = this.options;
+      var url = 'computer/'+params.computerId.toString()+'/scales';
+      if (params.deviceName) {
+          url = 'computer/'+params.computerId.toString()+'/scales/'+params.deviceName.toString();
+          if (params.deviceId) {
+              url = 'computer/'+params.computerId.toString()+'/scale/'+params.deviceName.toString()+'/'+params.deviceId.toString();
+              if (params.debug) {
+                  // default timeoutDuration is increased as this is a long running request
+                  defaults = _extend(defaults, {timeoutDuration: 15000});
+                  url = 'debug/'+url;
+              }
+          }
+      }
+      var merged = _extend(options, defaults);
+      ajax(merged, 'GET', url, null, this.options.apiKey, options.context||this);
     };
 
     return ApiClient;
