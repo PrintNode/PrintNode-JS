@@ -90,4 +90,14 @@ var printJobPayload = {
     "source": "javascript api client"
 }
 api.printjob(options, printJobPayload);
+
+// scales HTTP REST - https://www.printnode.com/docs/api/curl/#scales-http
+api.scales(options, {computerId: 12});
+// with device name
+api.scales(options, {computerId: 12, deviceName: 'foo_scales'});
+// with device name and device id
+api.scales(options, {computerId: 12, deviceName: 'foo_scales', deviceId: 34});
+// generate fake output from the scales for debug - https://www.printnode.com/docs/test-scales-api/
+// (default timeout is extended to 15,000ms)
+api.scales(options, {computerId: 12, deviceName: 'foo_scales', deviceId: 34, debug: true});
 ```
