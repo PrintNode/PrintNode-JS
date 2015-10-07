@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+    <html>
+    <head></head>
+    <body>
+        <h3>Websocket Client</h3>
+        <div id='content'></div>
+
+        <script type='text/javascript' src="./src/ws.js"></script>
+        <script type='text/javascript'>
+
+        var API_KEY = '<your_api_key_here>';
+
+        // got websocket
+        if (!PrintNode.WebSocket.isSupported()) {
+
+            // once a websocket is authenticated you can register
+            function authenticated (authData) {
+                if (authData.error) {
+                    // most likely not authenticated, see authData.error for more detail
+                    return;
+                }
+                // authData will contain information about accountId, permissions, and maxSubscriptions
+
+                // ok, now make some requests to the server to get data you're interested in
+                // pass in optional second argument to have this called when server publishes a event
+                // but you can also use the event emitter
+                this.getScales({}, function (measurement) {
+                    // this is only meaningful if the websocket is running on the same machine
+                    // as the running PrintNode client
+                    console.log("scales data by subscription callback", measurement);
+                    console.log("scales latency %dms", measurement.getLatency());
+                });
+
+            }
+
+            // error callback fired if anything goes wrong including
+            //  - exceptions thrown by subscription callbacks
+            //  - network issues which cause socket to fail or any timeouts
+            //  - errors in printnode server or client libs
+            function errorCallback (err, data) {
+                console.log("Error!", err, data);
+            }
+
+            // instantiate a new
+            var ws = new PrintNode.WebSocket(
+                {apiKey: API_KEY},
+                authenticated,
+                errorCallback
+            );
+
+            // subscribe to all computer events
+            ws.subscribe("computer", function computerEvent (something, info) {
+                // lots of things could come in on this event
+                // for now we're only interested in scalesMeasurements
+                if (something instanceof PrintNode.ScalesMeasurement) {
+                    console.log("scales data by computer subscription", something);
+                }
+            });
+
+            // subscribe to all scales events
+            ws.subscribe("scales", function computerEvent (measurement) {
+                console.log("scales data by scales subscription", measurement);
+            });
+
+            // debugging
+            ws.subscribe('system.state', function stateChange (newState) {
+                console.log("newState", newState);
+            });
+
+        // TODO fallback to polling
+        } else {
+
+            var httpOptions = {
+                success: function (responseBody, repsonse) {
+                    console.log("success", response);
+                },
+                error: function (responseBody, repsonse) {
+                    console.log(response);
+                },
+                complete: function (response) {
+                    console.log(
+                        "%d %s %s returned %db in %dms",
+                        response.xhr.status,
+                        response.reqMethod,
+                        response.reqUrl,
+                        response.xhr.responseText.length,
+                        response.getDuration()
+                    );
+                },
+                timeout: function (url, duration) {
+                    console.log("%s timeout %d", url, duration);
+                }
+            };
+
+            var http = new PrintNode.HTTP(
+                new PrintNode.HTTP.ApiKey(API_KEY),
+                httpOptions
+            );
+
+            http.scales(
+                {success: function (response) {
+                    console.log("success from callback", response);
+                }},
+                {computerId: 0}
+            ).then(
+                function (response, info ) {
+                    console.log("success from promise", response);
+                },
+                function (err) {
+                    throw "simulated exception in a promise callback";
+                }
+            // If your promise callbacks start throw[ing] you can 'catch' this in the returned
+            // promise from .then() but this is getting pretty meta right here.
+            // Callbacks really shouldn't throw exceptions in async code like this.
+            ).then(null, console.log.bind(console, "promise callbacks threw error;"));
+
+        }
+
+        </script>
+    </body>
+</html>
