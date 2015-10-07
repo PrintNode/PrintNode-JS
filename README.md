@@ -4,15 +4,11 @@ A tiny, zero dependency javascript client for the PrintNode WebSocket and HTTP A
 
 Learn more about the PrintNode api from here https://www.printnode.com/docs/api/curl and PrintNode from here http://www.printnode.com.
 
-## Support
+## Browser Support
 
-#### HTTP
+HTTP. All good browsers and IE8+ (it relies on `JSON.parse()` and `JSON.stringify`). If you need support for IE6+ any JSON shim e.g. http://bestiejs.github.io/json3/ will get it done.
 
-All good browsers and IE8+ (it relies on `JSON.parse()` and `JSON.stringify`). If you need support for IE6+ any JSON shim e.g. http://bestiejs.github.io/json3/ will get it done or you can go old school and use eval() and uneval.
-
-#### WebSocket
-
-All good browsers and IE10+ (it relies on the native `window.WebSocket`).
+WebSocket. All good browsers and IE10+ (it relies on the native `window.WebSocket`).
 
 ## What's It Got
 
@@ -38,19 +34,19 @@ Include one of the files in `src/*`. Everything will be imported into a global o
 
 ## WebSocket Client
 
-#### Does <insert browser here> Support This?
+#### Checking Browser Support?
 
 Check with a call to `PrintNode.Websocket.isSupported()`. If not you can fallback to HTTP and/or not use IE. We hope you chose not to use IE.
 
 #### Making a Connection
 
-`PrintNode.WebSocket` is a constructor. Takes 3 arguments
+`PrintNode.WebSocket` is a constructor. Takes 3 arguments.
 
  - `options` object, required. Structure. `{apiKey: 'your_api_key_here'}`
  - `authenticatedCallback` function, optional. Callback executed when socket is connected and the account authenticated.
  - `errorCallback` function, optional. Callback executed when a error occours.
 
-Errors come in a number of types
+Errors come in a number of types.
 
   - Network errors like server timeouts, unexpected disconnects.
   - Errors thrown by callbacks executed by the `WebSocket` object.
