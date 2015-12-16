@@ -196,6 +196,43 @@ Callbacks or pub/sub subscribers will receive scales events as a javascript obje
 
 If you want to get more sophisticated you can alter the `ScalesMeasurement` prototype at `PrintNode.ScalesMeasurement.prototype`. The factory method (which instantiates each `PrintNode.ScalesMeasurement` object) is `PrintNode.ScalesMeasurement.factory`. You can replace this if you wanted to do something else entirely.
 
+### No Longer Interested In Server Data? Unsubscribe!
+
+If you've made a call to the server to fetch data of some kind of e.g. via `getScales()` it will return a unique integer id which corresponds to this server subscription.
+
+Calling `.removeServerSubscription(id)` will have the server stop sending data for this subscription and free up the rate limiting resource consumed by the websocket. The return value is a array of subscription ids removed.
+
+For example.
+
+```
+var pN_WebSocket = new PrintNode.WebSocket(
+    options,
+    function (auth) {
+
+        // fetch test scale data
+        var scalesSub = this.getScales({computerId: 0});
+
+        // stop fetching after 5 seconds
+        setTimeout(
+            function stopSendingMeStuff() {
+                pN_WebSocket.removeServerSubscription(scalesSub);
+            },
+            5000
+        );
+    }
+);
+
+var messageCnt = 0;
+pN_WebSocket.subscribe('scales', function (measurement) {
+    console.log(++messageCnt, measurement);
+});
+
+```
+
+It's also possible to close all server subscriptions with `.removeServerSubscription()` with no arguments.
+
+When there are no server subscriptions active the socket the socket won't be closed and will remain authenticated. If you are writing a single page web application with long page lifetimes it may be useful to leave a socket in this state as you will save your users the time it would take to re establish the socket and authenticate.
+
 #### Testing
 
 We found it to be a bit of a drag developing all this with a physical scales device so we made a magic, always-there scale called `PrintNode Test Scale` attached to a computer id `0`. You can connect to this and it will publish a scales event once every second. All day, every day.
