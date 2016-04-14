@@ -1,0 +1,28 @@
+{
+	"name": "printnodejs",
+	"main": "src/printnode-ws-client-0.1.0.js",
+	"description": "Bower package for PrintNode-JS",
+	"ignore": [
+		".gitignore",
+		"bower.json",
+		"example.html",
+		"README.md"
+	],
+	"moduleType": [
+		"globals"
+	],
+	"keywords": [
+		"PrintNode-JS",
+		"PrintNode"
+	],
+	"authors": [
+		"Ryan Marshall <ryan@stoked-industries.com>"
+	],
+	"license": [
+		"MIT"
+	],
+	"repository": {
+		"type": "git",
+		"url": "git@github.com:StokedIndustries/PrintNode-JS-Bower.git"
+	}
+}
