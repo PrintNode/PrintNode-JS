@@ -1,5 +1,5 @@
 {
-	"name": "PrintNode-JS",
+	"name": "printnodejs",
 	"main": "src/printnode-ws-client-0.1.0.js",
 	"description": "Bower package for PrintNode-JS",
 	"ignore": [
