@@ -278,7 +278,7 @@ var options = {
         console.log("error", response, headers);
     },
     // called afer the api call has completed after success or error callback
-    complete: function (xhrObject) {
+    complete: function (response) {
       console.log(
           "%d %s %s returned %db in %dms",
           response.xhr.status,
