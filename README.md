@@ -36,7 +36,7 @@ Include one of the files in `src/*`. Everything will be imported into a global o
 
 #### Checking Browser Support?
 
-Check with a call to `PrintNode.Websocket.isSupported()`. If not you can fallback to HTTP and/or not use IE. We hope you chose not to use IE.
+Check with a call to `PrintNode.WebSocket.isSupported()`. If not you can fallback to HTTP and/or not use IE. We hope you chose not to use IE.
 
 #### Making a Connection
 
