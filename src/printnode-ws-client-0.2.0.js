@@ -1,7 +1,7 @@
 var PrintNode = (function () {
     "use strict";
 
-    var VERSION = '0.1.0';
+    var VERSION = '0.2.0';
 
     function noop () {}
 
@@ -78,6 +78,16 @@ var PrintNode = (function () {
             }
         }
         return true;
+    };
+
+    var _filter = function(obj, predicate, context) {
+        var results = [];
+        _each(obj, function(value, index, list) {
+            if (predicate.call(context, value, index, list)) {
+                results.push(value);
+            }
+        });
+        return results;
     };
 
     // object-has-keys check, keys must be a array
@@ -606,7 +616,58 @@ var PrintNode = (function () {
         return new ScalesMeasurement(data);
     };
 
-    // used by both the sca
+    // Computer Connections
+    function Connection (data) {
+        for (var key in data) {
+            this[key] = data[key];
+        }
+    }
+
+    // Wrapper for ComputerConnections
+    function ComputerConnections (accountId, computerId) {
+        this.computerId = computerId;
+        this.accountId = accountId;
+    }
+    ComputerConnections.prototype = new Array();
+
+    ComputerConnections.prototype.add = function (cc) {
+        if (!(cc instanceof Connection)) {
+            throw new PN_Error("Runtime", "You can only add a Connection object to a ComputerConnections array");
+        }
+        var computerId = cc.computerId;
+        if (null == this.computerId) {
+            this.computerId = computerId;
+        } else if (this.computerId !== computerId) {
+            throw new PN_Error("Runtime", "Attempting to add Connection object to a ComputerConnections array with different computerId");
+        }
+        this.push(cc);
+    };
+    ComputerConnections.prototype.isConnected = function () {
+        return this.length > 0;
+    };
+
+    ComputerConnections.factory = function (data) {
+        var accountId = data['accountId'];
+        var computerId = data['computerId'];
+        var connections = data['connections'];
+        if (!_isArray(connections)) {
+            throw new PN_Error("Server", "Server payload for ComputerConnections, 'connections' property isn't a array");
+        }
+        if (!_isInt(accountId)) {
+            throw new PN_Error("Server", "Server payload for ComputerConnections, 'accountId' should be a int");
+        }
+        if (!_isInt(computerId)) {
+            throw new PN_Error("Server", "Server payload for ComputerConnections, 'computerId' should be a int");
+        }
+        var computerConnections = new ComputerConnections(accountId, computerId);
+        _each(connections, function (connection) {
+            var cc = new Connection(connection);
+            computerConnections.add(cc);
+        });
+        return computerConnections;
+    };
+
+    // used by both WS and HTTP
     function generateScalesUrlFromOptions (options, allowNoOptions) {
         // shallow copy original object and escape values
         var encodedOptions = {}, keys = [], key, path;
@@ -627,6 +688,27 @@ var PrintNode = (function () {
         } else {
             // determine the options combination
             throw new PN_Error("RunTime", "Options key combination (" + keys.join(', ') + ") for getting scales data; please refer to documentation.");
+        }
+        return path.join('/');
+    }
+
+    // used by both WS and HTTP
+    function generateComputerConnectionsUrlFromOptions (options, allowNoOptions) {
+        // shallow copy original object and escape values
+        var encodedOptions = {}, keys = [], key, path;
+        for (key in options) {
+            encodedOptions[key] = encodeURIComponent(options[key]);
+            keys.push(key);
+        }
+        // build up the path obj
+        if (0 === keys.length && allowNoOptions) {
+            path = ['computers', 'connections'];
+        } else if (_hasKeys(encodedOptions, ['computerId'])) {
+            path = ['computer', encodedOptions.computerId, 'connections'];
+        // unknown options combination
+        } else {
+            // determine the options combination
+            throw new PN_Error("RunTime", "Options key combination (" + keys.join(', ') + ") for getting computer connections is invalid; please refer to documentation.");
         }
         return path.join('/');
     }
@@ -894,6 +976,19 @@ var PrintNode = (function () {
             );
         };
 
+        this.getComputerConnections = function (options, callback, ctx) {
+
+            var path = generateComputerConnectionsUrlFromOptions(options, true);
+
+            return makeServerSubscription(
+                "/"+path+"/",
+                callback,
+                ctx,
+                ComputerConnections.factory,
+                ["computers.connections"]
+            );
+        };
+
     }
     PN_WebSocket.isSupported = function () {
         return !!window.WebSocket;
@@ -902,6 +997,8 @@ var PrintNode = (function () {
     return {
         WebSocket: PN_WebSocket,
         ScalesMeasurement: ScalesMeasurement,
+        ComputerConnections: ComputerConnections,
+        Connection: Connection,
         Error: PN_Error
     };
 

@@ -248,9 +248,75 @@ E.g. You have two computers attached to your account with id `1` and `2`.
 
 You could accomplish 2. with two calls like so; `.getScales({computerId: 1})` and `.getScales({computerId: 2})`. This is allowed. The downsides are this is less efficient. Also two requests will consume twice as much of the rate limiting resource allocated to your account.
 
+### Tracking Client Connections
+
+PrintNode can publish events when a client connects or disconnects to one of our servers. You may find this useful if you wish to display information about the connected states of a computer.
+
+You can request connection / disconnection events as follows
+
+```javascript
+function authenticate (authData) {
+  if (authData.error) {
+    // handle the error
+    return;
+  }
+  // ok we're authenticated - now get some scales data
+  var subscriptionId = this.getComputerConnections(
+    {},
+    function subCallback (computerConnections) {
+      // this = context
+      // do work here
+      console.log(computerConnections);
+    } //, context
+  );
+}
+function error () {
+  console.error.apply(console, arguments);
+}
+var ws = new PrintNode.WebSocket(
+  {apiKey: 'insert apikey here'},
+  authenticate,
+  error
+);
+```
+
+The first argument to `.getComputerConnections` must be a object with one of the following key structures.
+
+- `{}` -> return all connection / disconnection information for the currently connected account.
+- `{computerId: <int>}` -> return all connection / disconnection information for a specific computerId
+
+This makes a request to PrintNode for all information which matches the options criteria. Three things will happen.
+
+* All current connection information will be immediately returned to the WebSocket client.
+* Data on future client connects / disconnect will made available to this Websocket client.
+* One unit of the WebSocket rate limiting resource will be consumed.
+
+The 2nd optional argument is a callback to be called when data matching this subscription is send by the websocket server. The third argument is a optional _context_ argument and will effect how `this` is resolved within the callback.
+
+The following pub/sub events are also published
+
+- `computers.connections`
+- `computer.<id>.connections`
+
+Callbacks or pub/sub subscribers will receive connection data as a javascript object of type `PrintNode.ComputerConnections` I.e. arguments[0] instanceof PrintNode.ComputerConnections === true.
+
+The `PrintNode.ComputerConnections` object's prototype is `new Array()`. I.e. It's 'array-like'; all the usual properties and methods or a javascript array work and are meaningful. It will contain zero or objects of type `PrintNode.Connection`. It will always have the properties `accountId` and `computerId` set. `PrintNode.Connection` objects in `PrintNode.ComputerConnections` always are for the same computer. `PrintNode.ComputerConnections` arrays contain all connection information for the computerId referenced. A `PrintNode.ComputerConnections` object with length zero indicates there are no current connections.
+
+#### Why is `PrintNode.ComputerConnections` array like?
+
+In most cases there is zero or one client connection (or `PrintNode.Connection`) for any given PrintNode Computer (or `computerId`) but there are some circumstances when there can be more than one connection open for a specific Computer.
+
+- If a computer running the PrintNode client has had it's config files copied two different physical computers would present as the same computer to PrintNode.
+- If two or more different computers share a hostname they will share the same PrintNode `computerId`.
+- In lossy network situations it's possible for the connection between a PrintNode client and a PrintNode server to be terminated ungracefully. In some circumstances this may mean that the client is aware of the loss of connection before the server. It may make a new connection before the server is able to recognise the first connection as terminated. In this situation there can be a upto seven second window where a single computer is registered as having two connections.
+
+#### Would like to extend `PrintNode.ComputerConnections` or do something else?
+
+No problem. You can alter the `ComputerConnections` prototype at `PrintNode.ComputerConnections.prototype`. The factory method (which instantiates each `PrintNode.ComputerConnections` object) is `PrintNode.ComputerConnections.factory`. If you replace this you can do something else entirely.
+
 #### What Next?
 
-PrintNode is going to continue adding more capabilities to the Websocket API. Very soon it will also be possible to fetch computer, printer and printjob states. The WebSocket API will not duplicate all of the functionality of the HTTP API.
+PrintNode is going to continue adding more capabilities to the Websocket API. Very soon it will also be possible to fetch printer and printjob states. The WebSocket API will not duplicate all of the functionality of the HTTP API.
 
 ## HTTP Client
 
