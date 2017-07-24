@@ -30,7 +30,7 @@ This is not yet at version 1.0.0 so there are some things missing:
 
 ## Getting Started
 
-Include the .js file in `src/`. Everything will be imported into a global object named `PrintNode`.
+Include one of the .js file in `src/`. Everything will be imported into a global object named `PrintNode`.
 
 ## WebSocket Client
 
@@ -156,7 +156,7 @@ ws.subscribe('a.b.c', callback)
 
 By default an instance of `PrintNode.WebSocket` won't do anything until you tell the server what you want.
 
-TO get some scales data:
+To get some scales data:
 
 ```javascript
 function authenticate (authData) {
@@ -240,7 +240,7 @@ A WebSocket connection will remain open and authenticated even with no subscript
 
 #### Testing
 
-WHile developing your application it is very useful to have a source of scales data to subscribe to, but it is inconvenient to have to actually plug in a scales device and occasionally put things on it to generate fresh data, so the PrintNode server provides a virtual scales device called `PrintNode Test Scale` attached to a computer id `0`. You can connect to this and it will continually publish a scales event every second.
+While developing your application it is very useful to have a source of scales data to subscribe to, but it is inconvenient to have to actually plug in a scales device and occasionally put things on it to generate fresh data, so the PrintNode server provides a virtual scales device called `PrintNode Test Scale` attached to a computer id `0`. You can connect to this and it will continually publish a scales event every second.
 
 #### Anything Else?
 
@@ -290,8 +290,6 @@ The first argument to `.getComputerConnections` must be an object with one of th
 - `{}` returns all connection/disconnection information for your account.
 - `{computerId: 123}` returns all connection/disconnection information for the computer with id `123`.
 
-This makes a subscription to all scales which match the options criteria. All matching scales information currently held at PrintNode will immediately be sent to the WebSocket client and new matching scales information will be sent to this WebSocket client as soon as it is received at PrintNode.
-
 The second argument is an optional function which will be called when a scales measurement is received by the WebSocket client.
 
 The third argument is an optional context; if supplied, its value is what `this` resolves to within the callback.
@@ -303,7 +301,18 @@ The following events are also published:
 
 Callbacks will receive connection data as a Javascript object of type `PrintNode.ComputerConnections` (i.e. `arguments[0] instanceof PrintNode.ComputerConnections === true`).
 
-The `PrintNode.ComputerConnections` object's prototype is `new Array()`, i.e. it's 'array-like'; it has all the usual properties and methods of a JavaScript array. It will contain zero or more objects of type `PrintNode.Connection`. It will always have the properties `accountId` and `computerId` set. `PrintNode.Connection` objects in `PrintNode.ComputerConnections` are all for the same computer. `PrintNode.ComputerConnections` arrays contain all connection information for the computerId referenced. A `PrintNode.ComputerConnections` object with length zero indicates there are no current connections.
+The `PrintNode.ComputerConnections` object's prototype is `new Array()`, i.e. it's 'array-like'; it has all the usual properties and methods of a JavaScript array. It will contain zero or more objects of type `PrintNode.Connection` and will have the properties `accountId` and `computerId` set. Any `PrintNode.Connection` objects in `PrintNode.ComputerConnections` all share the same `computerId`. `PrintNode.ComputerConnections` arrays contain all connection information for a specific `computerId`. A `PrintNode.ComputerConnections` object with length zero indicates there are no current connections.
+
+#### `PrintNode.Connection` object
+
+A `PrintNode.Connection` object will have the following properties set.
+
+* `computerId` - integer. The PrintNode `computerId` for the computer which has connected.
+* `connectionTimestamp` - string. The time at which this connection was established represented as a UTC timestamp.
+* `edition` - string. A short identifier describing the 'branding' of the client connected.
+* `hostname` - string. The operating system user and hostname of the computer running the PrintNode client.
+* `serverUuid` - string. A v4 UUID which which can be used as a unique identifier for this specific connection.
+* `version` - string. The version of the client software which has connected.
 
 #### Why is `PrintNode.ComputerConnections` array-like?
 
