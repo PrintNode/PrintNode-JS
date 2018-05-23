@@ -635,7 +635,7 @@ var PrintNode = (function () {
             throw new PN_Error("Runtime", "You can only add a Connection object to a ComputerConnections array");
         }
         var computerId = cc.computerId;
-        if (null == this.computerId) {
+        if (null == this.computerId || (this.computerId === 0 && computerId > 0)) {
             this.computerId = computerId;
         } else if (this.computerId !== computerId) {
             throw new PN_Error("Runtime", "Attempting to add Connection object to a ComputerConnections array with different computerId");
