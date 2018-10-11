@@ -1,9 +1,14 @@
 var PrintNode = (function () {
     "use strict";
 
-    var VERSION = '0.1.0';
+    var VERSION = '0.2.0';
 
     function noop () {}
+
+    // Check we've got JSON.parse, JSON.stringigy
+    if (!window.JSON) {
+        throw "Missing JSON support. You'll need to polyfil this";
+    }
 
     // util fn's
     var console = window.console || {log: noop, error: noop};
@@ -78,6 +83,16 @@ var PrintNode = (function () {
             }
         }
         return true;
+    };
+
+    var _filter = function(obj, predicate, context) {
+        var results = [];
+        _each(obj, function(value, index, list) {
+            if (predicate.call(context, value, index, list)) {
+                results.push(value);
+            }
+        });
+        return results;
     };
 
     // object-has-keys check, keys must be a array
@@ -448,8 +463,11 @@ var PrintNode = (function () {
     }
 
     // safe socket closure
-    function getWSClose (soc, shutdown) {
+    function getWSClose (soc, isConnected, shutdown) {
         return function () {
+            if (!isConnected) {
+                return false
+            }
             shutdown();
             try {
                 soc.close();
@@ -543,6 +561,7 @@ var PrintNode = (function () {
         // do the delete
         _each(toDelete, function (sub) {
             delete this.subscriptions[sub];
+            this.subscriptionCount--;
         }, this);
         // return what we've deleted
         return toDelete;
@@ -606,7 +625,58 @@ var PrintNode = (function () {
         return new ScalesMeasurement(data);
     };
 
-    // used by both the sca
+    // Computer Connections
+    function Connection (data) {
+        for (var key in data) {
+            this[key] = data[key];
+        }
+    }
+
+    // Wrapper for ComputerConnections
+    function ComputerConnections (accountId, computerId) {
+        this.computerId = computerId;
+        this.accountId = accountId;
+    }
+    ComputerConnections.prototype = new Array();
+
+    ComputerConnections.prototype.add = function (cc) {
+        if (!(cc instanceof Connection)) {
+            throw new PN_Error("Runtime", "You can only add a Connection object to a ComputerConnections array");
+        }
+        var computerId = cc.computerId;
+        if (null == this.computerId || (this.computerId === 0 && computerId > 0)) {
+            this.computerId = computerId;
+        } else if (this.computerId !== computerId) {
+            throw new PN_Error("Runtime", "Attempting to add Connection object to a ComputerConnections array with different computerId");
+        }
+        this.push(cc);
+    };
+    ComputerConnections.prototype.isConnected = function () {
+        return this.length > 0;
+    };
+
+    ComputerConnections.factory = function (data) {
+        var accountId = data['accountId'];
+        var computerId = data['computerId'];
+        var connections = data['connections'];
+        if (!_isArray(connections)) {
+            throw new PN_Error("Server", "Server payload for ComputerConnections, 'connections' property isn't a array");
+        }
+        if (!_isInt(accountId)) {
+            throw new PN_Error("Server", "Server payload for ComputerConnections, 'accountId' should be a int");
+        }
+        if (!_isInt(computerId)) {
+            throw new PN_Error("Server", "Server payload for ComputerConnections, 'computerId' should be a int");
+        }
+        var computerConnections = new ComputerConnections(accountId, computerId);
+        _each(connections, function (connection) {
+            var cc = new Connection(connection);
+            computerConnections.add(cc);
+        });
+        return computerConnections;
+    };
+
+    // used by both WS and HTTP
     function generateScalesUrlFromOptions (options, allowNoOptions) {
         // shallow copy original object and escape values
         var encodedOptions = {}, keys = [], key, path;
@@ -627,6 +697,27 @@ var PrintNode = (function () {
         } else {
             // determine the options combination
             throw new PN_Error("RunTime", "Options key combination (" + keys.join(', ') + ") for getting scales data; please refer to documentation.");
+        }
+        return path.join('/');
+    }
+
+    // used by both WS and HTTP
+    function generateComputerConnectionsUrlFromOptions (options, allowNoOptions) {
+        // shallow copy original object and escape values
+        var encodedOptions = {}, keys = [], key, path;
+        for (key in options) {
+            encodedOptions[key] = encodeURIComponent(options[key]);
+            keys.push(key);
+        }
+        // build up the path obj
+        if (0 === keys.length && allowNoOptions) {
+            path = ['computers', 'connections'];
+        } else if (_hasKeys(encodedOptions, ['computerId'])) {
+            path = ['computer', encodedOptions.computerId, 'connections'];
+        // unknown options combination
+        } else {
+            // determine the options combination
+            throw new PN_Error("RunTime", "Options key combination (" + keys.join(', ') + ") for getting computer connections is invalid; please refer to documentation.");
         }
         return path.join('/');
     }
@@ -856,7 +947,9 @@ var PrintNode = (function () {
 
         // socket wrapper methods
         send = getWSSendFn(soc, options.ack, options.ackTimeout, failHandler, logSend);
-        close = getWSClose(soc, send.shutdown);
+        close = getWSClose(soc, isConnected, send.shutdown);
+        // expose socket closing to the outside world
+        this.closeSocket = close
 
         // subscription management fns
         function makeServerSubscription (path, callback, ctx, handler, additionalTopics) {
@@ -894,14 +987,437 @@ var PrintNode = (function () {
             );
         };
 
+        this.getComputerConnections = function (options, callback, ctx) {
+
+            var path = generateComputerConnectionsUrlFromOptions(options, true);
+
+            return makeServerSubscription(
+                "/"+path+"/",
+                callback,
+                ctx,
+                ComputerConnections.factory,
+                ["computers.connections"]
+            );
+        };
+
     }
     PN_WebSocket.isSupported = function () {
         return !!window.WebSocket;
     };
 
+
+    // Minimalistic implementation of the Promises/A+ spec
+    // Based on the public domain PinkySwear.js 2.2.2 modified to remove everything not required for browser
+    var pinkySwear = function pinkySwear(extend) {
+        var state; // undefined/null = pending, true = fulfilled, false = rejected
+        var values = []; // an array of values as arguments for the then() handlers
+        var deferred = []; // functions to call when set() is invoked
+
+        var set = function(newState, newValues) {
+            if (undefined === state && undefined !== newState) {
+                state = newState;
+                values = newValues;
+                if (deferred.length) {
+                    setTimeout(
+                        function() {
+                            for (var i = 0; i < deferred.length; i++) {
+                                deferred[i]();
+                            }
+                        },
+                        0
+                    );
+                }
+            }
+            return state;
+        };
+
+        set.then = function(onFulfilled, onRejected) {
+            var promise2 = pinkySwear(extend);
+            var callCallbacks = function() {
+                try {
+                    var f = (state ? onFulfilled : onRejected);
+                    if (_isFunction(f)) {
+                        var resolve = function resolve (x) {
+                            var then, cbCalled = 0;
+                            try {
+                                if (x && (_isObject(x) || _isFunction(x)) && _isFunction(then = x.then)) {
+                                    if (x === promise2) {
+                                        throw new TypeError();
+                                    }
+                                    then.call(x,
+                                        function() {
+                                            if (!cbCalled++) {
+                                                resolve.apply(undefined, arguments);
+                                            }
+                                        },
+                                        function(value) {
+                                            if (!cbCalled++) {
+                                                promise2(false, [value]);
+                                            }
+                                        });
+                                } else {
+                                    promise2(true, arguments);
+                                }
+                            } catch (e) {
+                                if (!cbCalled++) {
+                                    promise2(false, [e]);
+                                }
+                            }
+                        };
+                        resolve(f.apply(undefined, values || []));
+                    } else {
+                        promise2(state, values);
+                    }
+                } catch (e) {
+                    promise2(false, [e]);
+                }
+            };
+            if (undefined !== state) {
+                setTimeout(callCallbacks, 0);
+            } else {
+                deferred.push(callCallbacks);
+            }
+            return promise2;
+        };
+        if (extend) {
+            set = extend(set);
+        }
+        return set;
+    };
+
+
+    //
+    // API client
+    //
+    // cross browser compatible XMLHttpRequest object generator
+    var genXHR = (function(){
+        var xhrs = [
+           function () { return new XMLHttpRequest(); },
+           function () { return new ActiveXObject("Microsoft.XMLHTTP"); },
+           function () { return new ActiveXObject("MSXML2.XMLHTTP.3.0"); },
+           function () { return new ActiveXObject("MSXML2.XMLHTTP"); }
+        ];
+        var _xhrf = null;
+        return function () {
+            if (_xhrf !== null) {
+              return _xhrf();
+            }
+            for (var i = 0, l = xhrs.length; i < l; i++) {
+                try {
+                    var f = xhrs[i], req = f();
+                    if (req !== null) {
+                        _xhrf = f;
+                        return req;
+                    }
+                } catch (e) {
+                    continue;
+                }
+            }
+            return function () { };
+        };
+    })();
+
+    function parseResponseBody (xhr) {
+        var contentTypeHeader = xhr.getResponseHeader("Content-Type"), response;
+        if (contentTypeHeader && "application/json" !== contentTypeHeader.split(";")[0]) {
+            throw new PN_Error("Server", "Server has not responded with valid JSON Content-Type");
+        }
+        try {
+            response = JSON.parse(xhr.responseText);
+        } catch (e) {
+            throw new PN_Error("Server", "Server has not responded valid JSON, it returned; "+xhr.responseText);
+        }
+        return response;
+    }
+
+    function parseResponseHeaders (xhr) {
+        var headerStr = xhr.getAllResponseHeaders();
+        var headers = {};
+        if (!headerStr) {
+            return headers;
+        }
+        var headerPairs = headerStr.split('\u000d\u000a');
+        for (var i = 0, ilen = headerPairs.length; i < ilen; i++) {
+            var headerPair = headerPairs[i];
+            var index = headerPair.indexOf('\u003a\u0020');
+            if (index > 0) {
+                var key = headerPair.substring(0, index);
+                var val = headerPair.substring(index + 2);
+                headers[key] = val;
+            }
+        }
+        return headers;
+    }
+
+    // ajax response
+    function AjaxResponse (xhr, method, url, body, reqStart) {
+        this.xhr = xhr;
+        this.reqMethod = method;
+        this.reqUrl = url;
+        this.reqBody = body;
+        this.reqStart = reqStart;
+        this.reqEnd = new Date();
+        this.response = parseResponseBody(xhr);
+        this.headers = parseResponseHeaders(xhr);
+    }
+    AjaxResponse.prototype.getDuration = function () {
+        return this.reqEnd.getTime() - this.reqStart.getTime();
+    };
+    AjaxResponse.prototype.getServerDuration = function () {
+        return 'abc';
+    };
+    AjaxResponse.prototype.isOk = function () {
+        // there shouldn't be any redirects from the printnode api so classify
+        // 3xx as errors
+        return this.xhr.status < 300;
+    };
+
+    function ajax (options, method, endpoint, body) {
+        var xhr = genXHR(), timer, n = 0;
+        var url = ['https://', options.server, '/', endpoint].join('');
+        var reqStart = new Date();
+        var promise = pinkySwear();
+        options = _extend(
+            {
+                timeoutDuration: 3000
+            },
+            options
+        );
+        if (options.timeoutDuration && options.timeout) {
+            timer = setTimeout(
+                function () {
+                    xhr.onreadystatechange = function () {};
+                    xhr.abort();
+                    if (options.timeout) {
+                        try {
+                            options.timeout.call(options.ctx, url, options.timeoutDuration);
+                        } catch (e) {
+                            console.error("exception thrown in timeout callback", e, options.timeout);
+                        }
+                        promise(
+                            false,
+                            ["timeout"]
+                        );
+                    }
+                },
+                options.timeoutDuration
+            );
+        }
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState == 4) {
+                // clear the timeout
+                if (timer) {
+                    clearTimeout(timer);
+                }
+                var response = new AjaxResponse(xhr, method, url, body, reqStart);
+
+                // console.log( "REV %s %s ", xhr.status, url, response, headers);
+                // there shouldn't be any redirects from the printnode api so classify
+                // 3xx as errors
+                if (response.isOk()) {
+                    if (options.success) {
+                        try {
+                            options.success.call(options.ctx, response.response, response);
+                        } catch (e) {
+                            console.error("exception thrown in success callback", e, options.success, response);
+                        }
+                        promise(
+                            true,
+                            [response.response, response]
+                        );
+                    }
+                } else if (options.error) {
+                    try {
+                        options.error.call(options.ctx, response.response, response);
+                    } catch (e) {
+                        console.error("exception thrown in error callback", e, options.error, response);
+                    }
+                    promise(
+                        false,
+                        [response.response, response]
+                    );
+                }
+                if (options.complete) {
+                    try {
+                        options.complete.call(options.ctx, response);
+                    } catch (e) {
+                        console.error("exception thrown in complete callback", e, options.complete, response);
+                    }
+                }
+            } else if (options.progress) {
+                try {
+                    options.progress(++n);
+                } catch (e) {
+                    console.error("exception thrown progress callback", e, options.progress);
+                }
+            }
+        };
+
+        // build and make the request
+        xhr.open(method, url);
+        options.auth.setXhrHeaders(xhr);
+        // xhr.setRequestHeader("X-Client", "printnode-javascript-client version; "+JS_CLIENT_VERSION)
+
+        if ("POST" === method || "PUT" === method || "PATCH" === method) {
+            xhr.setRequestHeader("Content-Type", "application/json");
+            body = JSON.stringify(body);
+        }
+        xhr.send(body);
+        // console.log("REQ %s %s", o.type, url, postData);
+        return promise;
+    }
+
+    // HTTP authentication object, everything must extend from this
+    function HTTPAuth () {
+        this.headers = {};
+    }
+    HTTPAuth.prototype.setAuthorizationHeader = function (username, password) {
+        this.headers["Authorization"] = ("Basic " + btoa(username+":"+password));
+    };
+    HTTPAuth.prototype.setXhrHeaders = function (xhr) {
+        var key;
+        for (key in this.headers) {
+            xhr.setRequestHeader(key, this.headers[key]);
+        }
+    };
+
+    // account switching isn't currently supported by authentication methods other
+    // than apikey; this is in here (as opposed to the ApiKey prototype) for development
+    HTTPAuth.prototype.childAccountById = function (accountId) {
+        if (_isInt(accountId)) {
+            throw "accountId must be a int";
+        }
+        this.headers["X-Child-Account-By-Id"] = accountId.toString();
+        return this;
+    };
+    HTTPAuth.prototype.childAccountByCreatorRef = function (creatorRef) {
+        if (_isString(creatorRef)) {
+            throw "creatorRef must be a string";
+        }
+        this.headers["X-Child-Account-By-CreatorRef"] = creatorRef;
+        return this;
+    };
+    HTTPAuth.prototype.childAccountByEmail = function (email) {
+        if (_isString(email)) {
+            throw "email must be a string";
+        }
+        this.headers["X-Child-Account-By-Email"] = email;
+        return this;
+    };
+
+    // authenticate by apiKey
+    function ApiKey (apiKey) {
+        if (!_isString(apiKey)) {
+            throw "apiKey must be a string";
+        }
+        this.setAuthorizationHeader(apiKey, "");
+    }
+    ApiKey.prototype = new HTTPAuth();
+
+    // account credentials
+    function UsernamePassword (username, password) {
+        if (!_isString(username)) {
+            throw "username must be a string";
+        }
+        if (!_isString(password)) {
+            throw "password must be a string";
+        }
+        this.headers["X-Auth-With-Account-Credentials"] = 'true';
+        this.setAuthorizationHeader(username, password);
+    }
+    UsernamePassword.prototype = new HTTPAuth();
+
+    // client key
+    function ClientKey (clientKey) {
+        if (!_isString(clientKey)) {
+            throw "clientKey must be a string";
+        }
+        this.headers["X-Auth-With-Client-Key"] = 'true';
+        this.setAuthorizationHeader(clientKey, "");
+    }
+    ClientKey.prototype = new HTTPAuth();
+
+    /**
+     * Takes options array {apiKey, version}
+     */
+    function HTTP (auth, options) {
+        options = options || {};
+        if (!(auth instanceof HTTPAuth)) {
+            throw "auth argument isn't of the right type";
+        }
+
+        this.options = _extend(
+            {
+                version: null, // which defaults to latest - currently this isn't used
+                server: 'api.printnode.com',
+                context: this
+            },
+            options
+        );
+
+        // make request options
+        this._makeReqOptions = function (options) {
+            return _extend(
+                {}, // ensure we get a entirely new obj
+                this.options, // defaults
+                options||{}, // passed arguments
+                {auth: auth} // always use stored authentication
+            );
+        };
+    }
+    HTTP.ApiKey = ApiKey;
+    HTTP.UsernamePassword = UsernamePassword;
+    HTTP.ClientKey = ClientKey;
+
+    // methods
+    HTTP.prototype.whoami = function getWhoami (options) {
+        ajax(this._makeReqOptions(options), 'GET', 'whoami');
+        return this;
+    };
+    HTTP.prototype.computers = function getComputers (options, params) {
+        var url = 'computers';
+        if (params && params.computerSet) {
+            url += '/'+params.computerSet.toString();
+        }
+        return ajax(this._makeReqOptions(options), 'GET', url);
+    };
+    HTTP.prototype.printers = function getPrinters (options, params) {
+        var url = 'printers';
+        if (params) {
+            if (params.computerSet) {
+                url = 'computers/'+params.computerSet.toString()+'/printers';
+            }
+            if (params.printerSet) {
+                url += '/'+params.printerSet.toString();
+            }
+        }
+        return ajax(this._makeReqOptions(options), 'GET', url);
+    };
+    HTTP.prototype.printjobs = function getPrintJobs (options, params) {
+        var url = 'printjobs';
+        if (params) {
+            if (params.printerSet) {
+                url = 'printers/'+params.printerSet.toString()+'/printjobs';
+            }
+            if (params.printjobSet) {
+                url += '/'+params.printjobSet.toString();
+            }
+        }
+        return ajax(this._makeReqOptions(options), 'GET', url);
+    };
+    HTTP.prototype.createPrintjob = function makePrintJob (options, payload) {
+        return ajax(this._makeReqOptions(options), 'POST', 'printjobs', payload);
+    };
+    HTTP.prototype.scales = function getScales (options, params) {
+        return ajax(this._makeReqOptions(options), 'GET', generateScalesUrlFromOptions(params, false));
+    };
+
     return {
         WebSocket: PN_WebSocket,
+        HTTP: HTTP,
         ScalesMeasurement: ScalesMeasurement,
+        ComputerConnections: ComputerConnections,
+        Connection: Connection,
         Error: PN_Error
     };
 
