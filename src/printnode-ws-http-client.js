@@ -1,7 +1,7 @@
 var PrintNode = (function () {
     "use strict";
 
-    var VERSION = '0.2.0';
+    var VERSION = '0.3.0';
 
     function noop () {}
 
@@ -481,16 +481,6 @@ var PrintNode = (function () {
         };
     }
 
-    function webSocketGetUrl (options) {
-        return [
-            options.scheme,
-            '://',
-            options.server,
-            '/ws/',
-            options.version
-        ].join('');
-    }
-
     // Subscription management
     function SocketSubscriptions (maxSubscriptions) {
         // Attempting to increase this here won't have any effect.
@@ -749,9 +739,8 @@ var PrintNode = (function () {
 
         options = _extend(
             {
+                centralOrigin: 'central.printnode.com',
                 version: VERSION, // default to latest
-                server: 'api.printnode.com',
-                scheme: 'wss',
                 ack: false,
                 ackTimeout: 10000,
                 authTimeout: 5000
@@ -763,7 +752,8 @@ var PrintNode = (function () {
         // only used in a couple of place if we decide to replace...
         var that = this;
         // variable declarations
-        var subscriptions, soc, send, close;
+        var subscriptions, soc, send
+        var close = function () {};
         // make this object pub/sub capable
         var publish = publify(this, failHandler);
         // oother declarations
@@ -934,77 +924,150 @@ var PrintNode = (function () {
             }
         }
 
-        // startup the websocket and wire it up
-        soc = new WebSocket(webSocketGetUrl(options));
-        soc.onopen = onopen;
-        soc.onclose = onclose;
-        soc.onerror = onerror;
-        soc.onmessage = onmessage;
+        var startWs = function startWs (webSocketUrl) {
+            // startup the websocket and wire it up
+            soc = new WebSocket(webSocketUrl);
+            soc.onopen = onopen;
+            soc.onclose = onclose;
+            soc.onerror = onerror;
+            soc.onmessage = onmessage;
 
-        function logSend (data) {
-            publish('system.socket.sent', data);
+            function logSend (data) {
+                publish('system.socket.sent', data);
+            }
+
+            // socket wrapper methods
+            send = getWSSendFn(soc, options.ack, options.ackTimeout, failHandler, logSend);
+            close = getWSClose(soc, isConnected, send.shutdown);
+            // expose socket closing to the outside world
+            this.closeSocket = close
+
+            // subscription management fns
+            function makeServerSubscription (path, callback, ctx, handler, additionalTopics) {
+                if (!_isString(path)) {
+                    throw new PN_Error("BadArguments", "Subscription path should be a string");
+                }
+                if (!subscriptions) {
+                    throw new PN_Error("RunTime", "Cannot create subscriptions until authenticated");
+                }
+                callback = callback || noop;
+                additionalTopics = additionalTopics || [];
+                var id = subscriptions.add(path, callback, ctx, handler, additionalTopics);
+                send('subscribe', [id, path], true);
+                return id;
+            }
+
+            this.removeServerSubscription = function (arg) {
+                var deleted = subscriptions.remove(arg);
+                if (deleted.length) {
+                    send('unsubscribe', deleted, true);
+                }
+                return deleted;
+            };
+
+            this.getScales = function (options, callback, ctx) {
+
+                var path = generateScalesUrlFromOptions(options, true);
+
+                return makeServerSubscription(
+                    "/"+path+"/",
+                    callback,
+                    ctx,
+                    ScalesMeasurement.factory,
+                    ["scales"]
+                );
+            };
+
+            this.getComputerConnections = function (options, callback, ctx) {
+
+                var path = generateComputerConnectionsUrlFromOptions(options, true);
+
+                return makeServerSubscription(
+                    "/"+path+"/",
+                    callback,
+                    ctx,
+                    ComputerConnections.factory,
+                    ["computers.connections"]
+                );
+            };
+        }.bind(this)
+
+        // if the server option has been manually specified use this to build the url otherwise use central proxy discovery
+        if (options.server) {
+            var webSocketUrl = [
+                'wss://',
+                options.server,
+                '/ws/',
+                options.version
+            ].join('');
+            startWs(webSocketUrl)
+            return
         }
 
-        // socket wrapper methods
-        send = getWSSendFn(soc, options.ack, options.ackTimeout, failHandler, logSend);
-        close = getWSClose(soc, isConnected, send.shutdown);
-        // expose socket closing to the outside world
-        this.closeSocket = close
-
-        // subscription management fns
-        function makeServerSubscription (path, callback, ctx, handler, additionalTopics) {
-            if (!_isString(path)) {
-                throw new PN_Error("BadArguments", "Subscription path should be a string");
+        // build urls
+        function fallback (reason) {
+            // falling back to api.printnode.com
+            if (console && console.log) {
+                console.log('Using api.printnode.com for websocket because; ' + reason + '. This is expected prior to 2020-12-27.')
             }
-            if (!subscriptions) {
-                throw new PN_Error("RunTime", "Cannot create subscriptions until authenticated");
-            }
-            callback = callback || noop;
-            additionalTopics = additionalTopics || [];
-            var id = subscriptions.add(path, callback, ctx, handler, additionalTopics);
-            send('subscribe', [id, path], true);
-            return id;
+            // start websocket using api.printnode.com
+            startWs('wss://api.printnode.com/ws/' + options.version)
         }
 
-        this.removeServerSubscription = function (arg) {
-            var deleted = subscriptions.remove(arg);
-            if (deleted.length) {
-                send('unsubscribe', deleted, true);
-            }
-            return deleted;
-        };
+        var centralUrl = 'https://' + options.centralOrigin + '/v3/proxy?key=' +  encodeURIComponent(apiKey)
 
-        this.getScales = function (options, callback, ctx) {
-
-            var path = generateScalesUrlFromOptions(options, true);
-
-            return makeServerSubscription(
-                "/"+path+"/",
-                callback,
-                ctx,
-                ScalesMeasurement.factory,
-                ["scales"]
-            );
-        };
-
-        this.getComputerConnections = function (options, callback, ctx) {
-
-            var path = generateComputerConnectionsUrlFromOptions(options, true);
-
-            return makeServerSubscription(
-                "/"+path+"/",
-                callback,
-                ctx,
-                ComputerConnections.factory,
-                ["computers.connections"]
-            );
-        };
-
+        // perform proxy / websocket discovery
+        try {
+            var reqCentral = ajax(
+                {
+                    url: centralUrl,
+                    auth: new ApiKey(apiKey),
+                    success: function (proxyHost, response) {
+                        if (response.xhr.status !== 200) {
+                            fallback("non HTTP 200 response from " + options.centralOrigin)
+                            return
+                        }
+                        ajax(
+                            {
+                                url: "https://" + proxyHost + "/v3/computeunit?key=" + encodeURIComponent(apiKey),
+                                auth: new HTTPAuth(),
+                                success: function (responseBody, response) {
+                                    if (response.xhr.status !== 200) {
+                                        fallback("non HTTP 200 response from " + proxyHost)
+                                        return
+                                    }
+                                    var webSocketUrl = 'wss://' + responseBody.httpPublicHost + '/ws/' + options.version
+                                    startWs(webSocketUrl)
+                                },
+                                error: function (responseBody, response) {
+                                    fallback("unexpected response from " + proxyHost)
+                                    return
+                                },
+                                timeout:  function (url, timeout) {
+                                    fallback("response timeout from " + proxyHost)
+                                    return
+                                }
+                            },
+                            'GET'
+                        )
+                    },
+                    error: function (responseBody, response) {
+                        fallback("unexpected response from " + options.centralOrigin)
+                    },
+                    timeout:  function (url, timeout) {
+                        fallback("response timeout from " + options.centralOrigin)
+                    }
+                },
+                'GET'
+            )
+        } catch (err) {
+            console.log("uncaught exception", err)
+        }
     }
+
     PN_WebSocket.isSupported = function () {
         return !!window.WebSocket;
     };
-
 
     // Minimalistic implementation of the Promises/A+ spec
     // Based on the public domain PinkySwear.js 2.2.2 modified to remove everything not required for browser
@@ -1117,38 +1180,6 @@ var PrintNode = (function () {
         };
     })();
 
-    function parseResponseBody (xhr) {
-        var contentTypeHeader = xhr.getResponseHeader("Content-Type"), response;
-        if (contentTypeHeader && "application/json" !== contentTypeHeader.split(";")[0]) {
-            throw new PN_Error("Server", "Server has not responded with valid JSON Content-Type");
-        }
-        try {
-            response = JSON.parse(xhr.responseText);
-        } catch (e) {
-            throw new PN_Error("Server", "Server has not responded valid JSON, it returned; "+xhr.responseText);
-        }
-        return response;
-    }
-
-    function parseResponseHeaders (xhr) {
-        var headerStr = xhr.getAllResponseHeaders();
-        var headers = {};
-        if (!headerStr) {
-            return headers;
-        }
-        var headerPairs = headerStr.split('\u000d\u000a');
-        for (var i = 0, ilen = headerPairs.length; i < ilen; i++) {
-            var headerPair = headerPairs[i];
-            var index = headerPair.indexOf('\u003a\u0020');
-            if (index > 0) {
-                var key = headerPair.substring(0, index);
-                var val = headerPair.substring(index + 2);
-                headers[key] = val;
-            }
-        }
-        return headers;
-    }
-
     // ajax response
     function AjaxResponse (xhr, method, url, body, reqStart) {
         this.xhr = xhr;
@@ -1157,8 +1188,11 @@ var PrintNode = (function () {
         this.reqBody = body;
         this.reqStart = reqStart;
         this.reqEnd = new Date();
-        this.response = parseResponseBody(xhr);
-        this.headers = parseResponseHeaders(xhr);
+        this.bodyParsingError = null;
+        this.headers = {}
+        
+        this.parseResponseBody();
+        this.parseResponseHeaders();
     }
     AjaxResponse.prototype.getDuration = function () {
         return this.reqEnd.getTime() - this.reqStart.getTime();
@@ -1167,23 +1201,61 @@ var PrintNode = (function () {
         return 'abc';
     };
     AjaxResponse.prototype.isOk = function () {
-        // there shouldn't be any redirects from the printnode api so classify
-        // 3xx as errors
-        return this.xhr.status < 300;
+        // there shouldn't be any redirects from the printnode api so only classify 2xx with a valid body as OK
+        return this.bodyParsingError === null && this.xhr.status >= 200 && this.xhr.status < 300;
+    };
+    AjaxResponse.prototype.parseResponseBody = function () {
+        var contentTypeHeader = this.xhr.getResponseHeader("Content-Type"), response;
+        if (contentTypeHeader && "application/json" !== contentTypeHeader.split(";")[0]) {
+            this.bodyParsingError = "Server has not responded with valid JSON Content-Type";
+            return
+        }
+        // don't parse response bodies for HTTP 204 responses
+        if (this.xhr.status === 204) {
+            return
+        }
+        // assume we've got a HTTP response body because we didn't get a 204
+        try {
+            this.response = JSON.parse(this.xhr.responseText);
+        } catch (e) {
+            // console.log(this.xhr.responseText)
+            // console.log(this.xhr)
+            this.bodyParsingError = "Server has not responded valid JSON, it returned; " + this.xhr.responseText;
+        }
+    };
+    AjaxResponse.prototype.parseResponseHeaders = function () {
+        var headerStr = this.xhr.getAllResponseHeaders();
+        if (!headerStr) {
+            return;
+        }
+        var headerPairs = headerStr.split('\u000d\u000a');
+        for (var i = 0, ilen = headerPairs.length; i < ilen; i++) {
+            var headerPair = headerPairs[i];
+            var index = headerPair.indexOf('\u003a\u0020');
+            if (index > 0) {
+                var key = headerPair.substring(0, index);
+                var val = headerPair.substring(index + 2);
+                this.headers[key] = val;
+            }
+        }
     };
 
     function ajax (options, method, endpoint, body) {
-        var xhr = genXHR(), timer, n = 0;
-        var url = ['https://', options.server, '/', endpoint].join('');
+        var xhr = genXHR(), timer, n = 0, url;
+        if (options.url) {
+            url = options.url
+        } else {
+            url = ['https://', options.server, '/', endpoint].join('');
+        }
         var reqStart = new Date();
         var promise = pinkySwear();
         options = _extend(
             {
-                timeoutDuration: 3000
+                timeoutDuration: 5000
             },
             options
         );
-        if (options.timeoutDuration && options.timeout) {
+        if (options.timeoutDuration) {
             timer = setTimeout(
                 function () {
                     xhr.onreadystatechange = function () {};
@@ -1194,11 +1266,12 @@ var PrintNode = (function () {
                         } catch (e) {
                             console.error("exception thrown in timeout callback", e, options.timeout);
                         }
-                        promise(
-                            false,
-                            ["timeout"]
-                        );
                     }
+                    promise(
+                        false,
+                        ["timeout"]
+                    );
+
                 },
                 options.timeoutDuration
             );
@@ -1209,6 +1282,7 @@ var PrintNode = (function () {
                 if (timer) {
                     clearTimeout(timer);
                 }
+
                 var response = new AjaxResponse(xhr, method, url, body, reqStart);
 
                 // console.log( "REV %s %s ", xhr.status, url, response, headers);
@@ -1221,16 +1295,18 @@ var PrintNode = (function () {
                         } catch (e) {
                             console.error("exception thrown in success callback", e, options.success, response);
                         }
-                        promise(
-                            true,
-                            [response.response, response]
-                        );
                     }
-                } else if (options.error) {
-                    try {
-                        options.error.call(options.ctx, response.response, response);
-                    } catch (e) {
-                        console.error("exception thrown in error callback", e, options.error, response);
+                    promise(
+                        true,
+                        [response.response, response]
+                    );
+                } else {
+                    if (options.error) {
+                        try {
+                            options.error.call(options.ctx, response.response, response);
+                        } catch (e) {
+                            console.error("exception thrown in error callback", e, options.error, response);
+                        }
                     }
                     promise(
                         false,
@@ -1418,7 +1494,8 @@ var PrintNode = (function () {
         ScalesMeasurement: ScalesMeasurement,
         ComputerConnections: ComputerConnections,
         Connection: Connection,
-        Error: PN_Error
+        Error: PN_Error,
+        ajax: ajax
     };
 
 })();
