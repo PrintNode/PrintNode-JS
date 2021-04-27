@@ -1014,14 +1014,14 @@ var PrintNode = (function () {
             startWs('wss://api.printnode.com/ws/' + options.version)
         }
 
-        var centralUrl = 'https://' + options.centralOrigin + '/v3/proxy?key=' +  encodeURIComponent(apiKey)
+        var centralUrl = 'https://' + options.centralOrigin + '/v3/proxy?key=' +  encodeURIComponent(options.apiKey)
 
         // perform proxy / websocket discovery
         try {
             var reqCentral = ajax(
                 {
                     url: centralUrl,
-                    auth: new ApiKey(apiKey),
+                    auth: new ApiKey(options.apiKey),
                     success: function (proxyHost, response) {
                         if (response.xhr.status !== 200) {
                             fallback("non HTTP 200 response from " + options.centralOrigin)
@@ -1029,7 +1029,7 @@ var PrintNode = (function () {
                         }
                         ajax(
                             {
-                                url: "https://" + proxyHost + "/v3/computeunit?key=" + encodeURIComponent(apiKey),
+                                url: "https://" + proxyHost + "/v3/computeunit?key=" + encodeURIComponent(options.apiKey),
                                 auth: new HTTPAuth(),
                                 success: function (responseBody, response) {
                                     if (response.xhr.status !== 200) {
