@@ -1,7 +1,7 @@
 var PrintNode = (function () {
     "use strict";
 
-    var VERSION = '0.3.0';
+    var VERSION = '0.4.0';
 
     function noop () {}
 
@@ -462,25 +462,6 @@ var PrintNode = (function () {
         return send;
     }
 
-    // safe socket closure
-    function getWSClose (soc, isConnected, shutdown) {
-        return function () {
-            if (!isConnected) {
-                return false
-            }
-            shutdown();
-            try {
-                soc.close();
-            } catch (err) {
-                // Apparently this should never happen; docs say websockets are
-                // safe for multiple disconnections. They're wrong.
-                console.log("failed to close socket", err);
-                return false;
-            }
-            return true;
-        };
-    }
-
     // Subscription management
     function SocketSubscriptions (maxSubscriptions) {
         // Attempting to increase this here won't have any effect.
@@ -938,9 +919,26 @@ var PrintNode = (function () {
 
             // socket wrapper methods
             send = getWSSendFn(soc, options.ack, options.ackTimeout, failHandler, logSend);
-            close = getWSClose(soc, isConnected, send.shutdown);
-            // expose socket closing to the outside world
-            this.closeSocket = close
+
+            // expose socket closing to the outside world and prevent calling on
+            // an already closed socket
+            this.closeSocket = function () {
+                // is socket already shutdown
+                if (!isConnected) {
+                    return false
+                }
+                setState('CLOSINGSOCKET');
+                send.shutdown();
+                try {
+                    soc.close();
+                } catch (err) {
+                    // Apparently this should never happen; docs say websockets are
+                    // safe for multiple disconnections. They're wrong.
+                    console.log("failed to close socket", err);
+                    return false;
+                }
+                return true;
+            };
 
             // subscription management fns
             function makeServerSubscription (path, callback, ctx, handler, additionalTopics) {
@@ -1014,54 +1012,59 @@ var PrintNode = (function () {
             startWs('wss://api.printnode.com/ws/' + options.version)
         }
 
-        var centralUrl = 'https://' + options.centralOrigin + '/v3/proxy?key=' +  encodeURIComponent(apiKey)
-
-        // perform proxy / websocket discovery
-        try {
-            var reqCentral = ajax(
-                {
-                    url: centralUrl,
-                    auth: new ApiKey(apiKey),
-                    success: function (proxyHost, response) {
-                        if (response.xhr.status !== 200) {
-                            fallback("non HTTP 200 response from " + options.centralOrigin)
-                            return
-                        }
-                        ajax(
-                            {
-                                url: "https://" + proxyHost + "/v3/computeunit?key=" + encodeURIComponent(apiKey),
-                                auth: new HTTPAuth(),
-                                success: function (responseBody, response) {
-                                    if (response.xhr.status !== 200) {
-                                        fallback("non HTTP 200 response from " + proxyHost)
+        var useAbs = false
+        if (!useAbs) {
+            // start websocket using api.printnode.com
+            startWs('wss://api.printnode.com/ws/' + options.version)
+        } else {
+            var centralUrl = 'https://' + options.centralOrigin + '/v3/proxy?key=' +  encodeURIComponent(options.apiKey)
+            // perform proxy / websocket discovery
+            try {
+                var reqCentral = ajax(
+                    {
+                        url: centralUrl,
+                        auth: new ApiKey(options.apiKey),
+                        success: function (proxyHost, response) {
+                            if (response.xhr.status !== 200) {
+                                fallback("non HTTP 200 response from " + options.centralOrigin)
+                                return
+                            }
+                            var webSocketUrl = 'wss://' + responseBody.httpPublicHost + '/ws/' + options.version
+                            startWs(webSocketUrl)
+                            ajax(
+                                {
+                                    url: "https://" + proxyHost + "/v3/computeunit?key=" + encodeURIComponent(options.apiKey),
+                                    auth: new HTTPAuth(),
+                                    success: function (responseBody, response) {
+                                        if (response.xhr.status !== 200) {
+                                            fallback("non HTTP 200 response from " + proxyHost)
+                                            return
+                                        }
+                                    },
+                                    error: function (responseBody, response) {
+                                        fallback("unexpected response from " + proxyHost)
+                                        return
+                                    },
+                                    timeout:  function (url, timeout) {
+                                        fallback("response timeout from " + proxyHost)
                                         return
                                     }
-                                    var webSocketUrl = 'wss://' + responseBody.httpPublicHost + '/ws/' + options.version
-                                    startWs(webSocketUrl)
                                 },
-                                error: function (responseBody, response) {
-                                    fallback("unexpected response from " + proxyHost)
-                                    return
-                                },
-                                timeout:  function (url, timeout) {
-                                    fallback("response timeout from " + proxyHost)
-                                    return
-                                }
-                            },
-                            'GET'
-                        )
+                                'GET'
+                            )
+                        },
+                        error: function (responseBody, response) {
+                            fallback("unexpected response from " + options.centralOrigin)
+                        },
+                        timeout:  function (url, timeout) {
+                            fallback("response timeout from " + options.centralOrigin)
+                        }
                     },
-                    error: function (responseBody, response) {
-                        fallback("unexpected response from " + options.centralOrigin)
-                    },
-                    timeout:  function (url, timeout) {
-                        fallback("response timeout from " + options.centralOrigin)
-                    }
-                },
-                'GET'
-            )
-        } catch (err) {
-            console.log("uncaught exception", err)
+                    'GET'
+                )
+            } catch (err) {
+                console.log("uncaught exception", err)
+            }
         }
     }
 
