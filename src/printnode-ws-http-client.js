@@ -50,6 +50,17 @@ var PrintNode = (function () {
         return o;
     };
 
+        // shallow extend a object
+    var _extend = function (o) {
+        _each(Array.prototype.slice.call(arguments, 1), function (a) {
+            for (var p in a) {
+                if (undefined !== a[p]) {
+                    o[p] = a[p];
+                }
+            }
+        });
+        return o;
+    };
     var _isArray = Array.isArray || function (obj) {
         return '[object Array]' === Object.prototype.toString.call(obj);
     };
