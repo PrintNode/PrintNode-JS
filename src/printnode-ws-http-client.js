@@ -1,7 +1,7 @@
 var PrintNode = (function () {
     "use strict";
 
-    var VERSION = '0.4.0';
+    var VERSION = '0.4.1';
 
     function noop () {}
 
@@ -612,14 +612,21 @@ var PrintNode = (function () {
 
     ComputerConnections.prototype.add = function (cc) {
         if (!(cc instanceof Connection)) {
-            throw new PN_Error("Runtime", "You can only add a Connection object to a ComputerConnections array");
+            throw new PN_Error("RunTime", "You can only add a Connection object to a ComputerConnections array");
         }
+
+        /*
+        no need to be testing cc.computerId, it's not there because the server doesn't send it (why would it?)
+
         var computerId = cc.computerId;
         if (null == this.computerId || (this.computerId === 0 && computerId > 0)) {
             this.computerId = computerId;
         } else if (this.computerId !== computerId) {
-            throw new PN_Error("Runtime", "Attempting to add Connection object to a ComputerConnections array with different computerId");
+            throw new PN_Error("RunTime", "Attempting to add Connection object to a ComputerConnections array with different computerId");
         }
+        */
+
+        cc.computerId = this.computerId
         this.push(cc);
     };
     ComputerConnections.prototype.isConnected = function () {
