@@ -1488,6 +1488,14 @@ var PrintNode = (function () {
             if (params.printjobSet) {
                 url += '/'+params.printjobSet.toString();
             }
+            if (params.range) {
+                if (params.range.limit !== undefined) {
+                    url += '?limit='+params.range.limit.toString();
+                }
+                if (params.range.offset !== undefined) {
+                    url += (params.range.limit !== undefined ? '&' : '?')+'offset='+params.range.offset.toString();
+                }
+            }
         }
         return ajax(this._makeReqOptions(options), 'GET', url);
     };
